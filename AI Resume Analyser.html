@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AI Resume Analyser</title>
+<style>
+:root{--bg:#f7f6f2;--card:#fff;--text:#1d1d1b;--muted:#6b6a64;--line:#e3e1d9;--accent:#2f6fed;--good:#1d8a4f;--warn:#c27a0a;--bad:#c4382f;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#16161a;--card:#202026;--text:#ececea;--muted:#9a99a3;--line:#33333b;--accent:#6b9bff;--good:#4cc686;--warn:#e5a53a;--bad:#ff7a70;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#16161a;--card:#202026;--text:#ececea;--muted:#9a99a3;--line:#33333b;--accent:#6b9bff;--good:#4cc686;--warn:#e5a53a;--bad:#ff7a70;color-scheme:dark}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:860px;margin:0 auto;padding:28px 18px 60px}
+h1{font-size:1.8rem;margin:0 0 4px}
+.sub{color:var(--muted);margin:0 0 22px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:16px}
+label{display:block;font-weight:600;margin-bottom:6px}
+textarea{width:100%;min-height:200px;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--text);font:inherit;resize:vertical}
+textarea.jd{min-height:110px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:10px}
+button,.file{background:var(--accent);color:#fff;border:0;border-radius:10px;padding:10px 18px;font:inherit;font-weight:600;cursor:pointer}
+button:disabled{opacity:.55;cursor:wait}
+.file{background:transparent;color:var(--accent);border:1px solid var(--line)}
+.file input{display:none}
+#status{color:var(--muted)}
+.score{display:flex;gap:20px;align-items:center;flex-wrap:wrap}
+.ring{width:110px;height:110px;border-radius:50%;display:grid;place-items:center;font-size:2rem;font-weight:700;background:conic-gradient(var(--c) calc(var(--p)*1%),var(--line) 0)}
+.ring span{width:84px;height:84px;border-radius:50%;background:var(--card);display:grid;place-items:center}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+h2{font-size:1.05rem;margin:0 0 8px}
+ul{margin:0;padding-left:20px}li{margin-bottom:6px}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{border:1px solid var(--line);border-radius:999px;padding:2px 11px;font-size:.88rem}
+.bars div{margin-bottom:8px;font-size:.92rem}
+.bar{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin-top:3px}
+.bar i{display:block;height:100%;background:var(--accent)}
+.err{color:var(--bad)}
+.hide{display:none}
+</style>
+</head>
+<body>
+<main>
+<h1>AI Resume Analyser</h1>
+<p class="sub">Paste your résumé, optionally add a job description, and get a score, strengths and concrete fixes.</p>
+
+<div class="card">
+  <label for="resume">Your résumé</label>
+  <textarea id="resume" placeholder="Paste your résumé text here…"></textarea>
+  <div class="row">
+    <label class="file">Upload .txt / .md<input id="file" type="file" accept=".txt,.md,text/plain"></label>
+  </div>
+  <label for="jd" style="margin-top:16px">Job description <span style="font-weight:400;color:var(--muted)">(optional)</span></label>
+  <textarea id="jd" class="jd" placeholder="Paste the job posting to check keyword match…"></textarea>
+  <div class="row">
+    <button id="go">Analyse résumé</button>
+    <span id="status"></span>
+  </div>
+</div>
+
+<div id="out" class="hide">
+  <div class="card score">
+    <div class="ring" id="ring"><span id="scoreNum"></span></div>
+    <div style="flex:1;min-width:220px"><h2>Overall verdict</h2><p id="summary" style="margin:0"></p></div>
+  </div>
+  <div class="card"><h2>Section scores</h2><div class="bars" id="bars"></div></div>
+  <div class="grid">
+    <div class="card"><h2>Strengths</h2><ul id="strengths"></ul></div>
+    <div class="card"><h2>Improvements</h2><ul id="improve"></ul></div>
+  </div>
+  <div class="card" id="kwCard"><h2>Keyword match</h2>
+    <p style="margin:0 0 6px;color:var(--muted)">Found</p><div class="tags" id="kwFound"></div>
+    <p style="margin:12px 0 6px;color:var(--muted)">Missing</p><div class="tags" id="kwMissing"></div>
+  </div>
+  <div class="card"><h2>Rewrite suggestions</h2><ul id="rewrites"></ul></div>
+</div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const colorFor = n => n >= 75 ? 'var(--good)' : n >= 50 ? 'var(--warn)' : 'var(--bad)';
+function fill(id, items){
+  const el = $(id); el.textContent = '';
+  (items || []).forEach(t => { const li = document.createElement('li'); li.textContent = t; el.appendChild(li); });
+}
+function tags(id, items){
+  const el = $(id); el.textContent = '';
+  (items || []).forEach(t => { const s = document.createElement('span'); s.className = 'tag'; s.textContent = t; el.appendChild(s); });
+  if (!items || !items.length) el.textContent = '—';
+}
+$('file').addEventListener('change', e => {
+  const f = e.target.files[0]; if (!f) return;
+  const r = new FileReader();
+  r.onload = () => { $('resume').value = r.result; };
+  r.readAsText(f);
+});
+$('go').addEventListener('click', async () => {
+  const resume = $('resume').value.trim(), jd = $('jd').value.trim();
+  const status = $('status'); status.className = '';
+  if (resume.length < 80) { status.textContent = 'Please paste a longer résumé first.'; status.className = 'err'; return; }
+  $('go').disabled = true; status.textContent = 'Analysing…';
+  try {
+    const sample = await claude.use('sample');
+    if (!sample) throw {message: 'AI analysis isn’t available in this view.'};
+    const prompt = `You are an expert recruiter and ATS specialist. Analyse the résumé below${jd ? ' against the job description' : ''}.
+Return ONLY JSON, no markdown, with this shape:
+{"score":0-100,"summary":"2 sentences","sections":[{"name":"Impact & metrics","score":0-100},{"name":"Clarity & formatting","score":0-100},{"name":"Skills relevance","score":0-100},{"name":"ATS friendliness","score":0-100}],"strengths":["..."],"improvements":["..."],"keywords_found":["..."],"keywords_missing":["..."],"rewrites":["Weak line → stronger line"]}
+Give 3-5 items per list, specific and actionable. ${jd ? '' : 'No job description was given, so keywords should be common ones for the candidate’s apparent field.'}
+
+RÉSUMÉ:
+${resume}
+${jd ? '\nJOB DESCRIPTION:\n' + jd : ''}`;
+    const d = await sample.json(prompt, {modelTier: 'default'});
+    const s = Math.max(0, Math.min(100, Math.round(d.score)));
+    const ring = $('ring'); ring.style.setProperty('--p', s); ring.style.setProperty('--c', colorFor(s));
+    $('scoreNum').textContent = s;
+    $('summary').textContent = d.summary || '';
+    const bars = $('bars'); bars.textContent = '';
+    (d.sections || []).forEach(x => {
+      const div = document.createElement('div');
+      const t = document.createElement('span'); t.textContent = x.name + ' — ' + x.score;
+      const b = document.createElement('div'); b.className = 'bar';
+      const i = document.createElement('i'); i.style.width = Math.max(0, Math.min(100, x.score)) + '%'; i.style.background = colorFor(x.score);
+      b.appendChild(i); div.append(t, b); bars.appendChild(div);
+    });
+    fill('strengths', d.strengths); fill('improve', d.improvements); fill('rewrites', d.rewrites);
+    tags('kwFound', d.keywords_found); tags('kwMissing', d.keywords_missing);
+    $('out').classList.remove('hide');
+    $('out').scrollIntoView({behavior: 'smooth'});
+    status.textContent = '';
+  } catch (e) {
+    status.textContent = e && e.code === 'rate_limited' ? 'Rate limited, please wait a moment.' : (e && e.message) || 'Something went wrong. Please try again.';
+    status.className = 'err';
+  } finally { $('go').disabled = false; }
+});
+</script>
+</body>
+</html>
